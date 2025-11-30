@@ -1,18 +1,57 @@
-# Parameter Reduction for PyTorch Image Models
+# Parameter Reduction for Vision Transformers
 
-A parameter reduction module designed to integrate with [timm](https://github.com/huggingface/pytorch-image-models) (PyTorch Image Models) for efficient model training.
+This repository contains the official implementation of **"Parameter Reduction Improves Vision Transformers: A Comparative Study of Sharing and Pruning"**.
 
-## Overview
+[[arXiv]](TBD)
 
-This repository provides parameter reduction strategies for Vision Transformers (ViT) that can be seamlessly integrated into the timm training pipeline. It includes a modified `train.py` script and a `parameter_reduction` module with three different strategies for reducing MLP parameters.
+## Key Findings
 
-### Reduction Strategies
+- **Parameter reduction can improve accuracy**: Both GroupedMLP and ShallowMLP outperform the 86.6M baseline while using only 67.3% of parameters
+- **Dramatically improved training stability**: Peak-to-final accuracy degradation drops from 0.47% (baseline) to 0.03–0.06% (reduced models)
+- **Complementary trade-offs**: GroupedMLP preserves compute cost but reduces memory; ShallowMLP reduces both parameters and FLOPs for 38% faster inference
+- **ViT-B/16 is overparameterized**: Standard training operates in a regime where MLP capacity can be reduced without harming—and can even improve—performance
 
-| Strategy | Description | When Applied | Parameter Reduction |
-|----------|-------------|--------------|---------------------|
-| **ThinMLP** | Reduces MLP hidden dimension via `mlp_ratio` | Before model creation | ~33% fewer params |
-| **ShallowMLP** | Prunes MLP weights after full initialization | After model creation | ~33% fewer params |
-| **GroupedMLP** | Shares MLPs between adjacent block pairs | After model creation | ~33% fewer params |
+## Results
+
+### ImageNet-1K Validation Results
+
+| Model | Params | Top-1 Acc (%) | Top-5 Acc (%) | Peak Epoch | Δ(P→F) (%) | Throughput (img/s) |
+|-------|--------|---------------|---------------|------------|------------|-------------------|
+| Baseline | 86.6M | 81.05±0.11 | 95.36±0.08 | 219±13 | 0.47±0.04 | 1,020 |
+| **GroupedMLP** | 58.2M | **81.47±0.11** | **95.66±0.08** | 272±1 | **0.06±0.06** | 1,017 |
+| **ShallowMLP** | 58.2M | 81.25±0.02 | 95.52±0.02 | 273±0 | **0.03±0.01** | **1,411** |
+
+*Both parameter-reduced models significantly outperform baseline (p < 0.05, paired t-test). Δ(P→F) = Peak-to-final accuracy gap (lower is better). Mean ± std over two seeds.*
+
+### Architecture Comparison
+
+| Model | Params | MLP Params | Unique MLPs | GFLOPs | Expansion Ratio |
+|-------|--------|------------|-------------|--------|-----------------|
+| Baseline | 86.6M | 56.7M | 12 | 16.9 | 4× |
+| GroupedMLP | 58.2M | 28.3M | 6 | 16.9 | 4× |
+| ShallowMLP | 58.2M | 28.3M | 12 | 11.3 | 2× |
+
+## Reduction Strategies
+
+| Strategy | Description | When Applied | Key Benefit |
+|----------|-------------|--------------|-------------|
+| **GroupedMLP** | Shares MLP weights between adjacent block pairs | After model creation | Same compute, reduced memory |
+| **ShallowMLP** | Prunes MLP hidden dimension (3072 → 1536) | After model creation | 38% faster inference |
+| **ThinMLP*** | Reduces MLP ratio during model creation | Before model creation | Smaller model from scratch |
+
+*\*ThinMLP is an additional experimental strategy not included in the paper.*
+
+## Requirements
+
+- Python ≥ 3.8
+- PyTorch ≥ 1.12
+- torchvision ≥ 0.13
+- timm == 0.9.x or later
+- CUDA ≥ 11.3 (for GPU training)
+
+```bash
+pip install torch torchvision timm
+```
 
 ## Installation
 
@@ -84,74 +123,6 @@ Standard ViT-B/16 training without any parameter reduction:
     --experiment baseline_vit_b16
 ```
 
-#### ThinMLP Strategy
-
-Creates model with reduced MLP ratio from scratch (default: 2.0 instead of 4.0):
-
-```bash
-./distributed_train.sh 2 /path/to/imagenet \
-    --model vit_base_patch16_224 \
-    --reduction-strategy thin \
-    --reduction-mlp-ratio 2.0 \
-    --batch-size 256 \
-    --grad-accum-steps 2 \
-    --opt adamw \
-    --lr 0.001 \
-    --weight-decay 0.05 \
-    --sched cosine \
-    --epochs 300 \
-    --warmup-epochs 5 \
-    --drop-path 0.1 \
-    --mixup 0.8 \
-    --cutmix 1.0 \
-    --reprob 0.25 \
-    --aa rand-m9-mstd0.5-inc1 \
-    --aug-repeats 3 \
-    --amp \
-    --channels-last \
-    --pin-mem \
-    --workers 20 \
-    --model-ema \
-    --model-ema-decay 0.9998 \
-    --seed 42 \
-    --experiment thin_mlp_vit_b16 \
-    --output ./output/thin_mlp
-```
-
-#### ShallowMLP Strategy
-
-Creates full model, then prunes MLP hidden dimensions (default: keep 50%):
-
-```bash
-./distributed_train.sh 2 /path/to/imagenet \
-    --model vit_base_patch16_224 \
-    --reduction-strategy shallow \
-    --reduction-mlp-ratio 0.5 \
-    --batch-size 256 \
-    --grad-accum-steps 2 \
-    --opt adamw \
-    --lr 0.001 \
-    --weight-decay 0.05 \
-    --sched cosine \
-    --epochs 300 \
-    --warmup-epochs 5 \
-    --drop-path 0.1 \
-    --mixup 0.8 \
-    --cutmix 1.0 \
-    --reprob 0.25 \
-    --aa rand-m9-mstd0.5-inc1 \
-    --aug-repeats 3 \
-    --amp \
-    --channels-last \
-    --pin-mem \
-    --workers 20 \
-    --model-ema \
-    --model-ema-decay 0.9998 \
-    --seed 42 \
-    --experiment shallow_mlp_vit_b16 \
-    --output ./output/shallow_mlp
-```
-
 #### GroupedMLP Strategy
 
 Shares MLP modules between adjacent block pairs (6 unique MLPs instead of 12):
@@ -186,46 +157,126 @@ Shares MLP modules between adjacent block pairs (6 unique MLPs instead of 12):
     --output ./output/grouped_mlp
 ```
 
-**GroupedMLP Scale Factor Options:**
-- `0.707` (1/√2): Compensates for doubled gradient accumulation from shared weights
-- `1.0`: No scaling (raw gradient accumulation)
+#### ShallowMLP Strategy
+
+Creates full model, then prunes MLP hidden dimensions (3072 → 1536):
+
+```bash
+./distributed_train.sh 2 /path/to/imagenet \
+    --model vit_base_patch16_224 \
+    --reduction-strategy shallow \
+    --reduction-mlp-ratio 0.5 \
+    --batch-size 256 \
+    --grad-accum-steps 2 \
+    --opt adamw \
+    --lr 0.001 \
+    --weight-decay 0.05 \
+    --sched cosine \
+    --epochs 300 \
+    --warmup-epochs 5 \
+    --drop-path 0.1 \
+    --mixup 0.8 \
+    --cutmix 1.0 \
+    --reprob 0.25 \
+    --aa rand-m9-mstd0.5-inc1 \
+    --aug-repeats 3 \
+    --amp \
+    --channels-last \
+    --pin-mem \
+    --workers 20 \
+    --model-ema \
+    --model-ema-decay 0.9998 \
+    --seed 42 \
+    --experiment shallow_mlp_vit_b16 \
+    --output ./output/shallow_mlp
+```
+
+#### ThinMLP Strategy (Experimental)
+
+Creates model with reduced MLP ratio from scratch:
+
+```bash
+./distributed_train.sh 2 /path/to/imagenet \
+    --model vit_base_patch16_224 \
+    --reduction-strategy thin \
+    --reduction-mlp-ratio 2.0 \
+    --batch-size 256 \
+    --grad-accum-steps 2 \
+    --opt adamw \
+    --lr 0.001 \
+    --weight-decay 0.05 \
+    --sched cosine \
+    --epochs 300 \
+    --warmup-epochs 5 \
+    --drop-path 0.1 \
+    --mixup 0.8 \
+    --cutmix 1.0 \
+    --reprob 0.25 \
+    --aa rand-m9-mstd0.5-inc1 \
+    --aug-repeats 3 \
+    --amp \
+    --channels-last \
+    --pin-mem \
+    --workers 20 \
+    --model-ema \
+    --model-ema-decay 0.9998 \
+    --seed 42 \
+    --experiment thin_mlp_vit_b16 \
+    --output ./output/thin_mlp
+```
 
 ## Strategy Details
 
-### ThinMLP
+### GroupedMLP
 
-Modifies the `mlp_ratio` parameter during model creation. Standard ViT uses `mlp_ratio=4.0` (768 → 3072 → 768). With `--reduction-mlp-ratio 2.0`, the MLP becomes (768 → 1536 → 768).
+Shares MLP parameters between adjacent transformer blocks: blocks (2i, 2i+1) for i ∈ {0,...,5} reference identical parameters, reducing 12 unique MLPs to 6. Weights are scaled at initialization to maintain proper gradient flow:
 
-**Key characteristic:** Model is created smaller from the start — never instantiates full 86M parameters.
+```
+θ_shared ← (1/√2) · θ_init  for W_fc1, W_fc2, b_fc1
+```
+
+**Key characteristics:**
+- Maintains baseline computational cost (16.9 GFLOPs)
+- Reduces memory footprint through weight sharing
+- Same MLP serves multiple depths, acting as implicit regularizer
 
 ### ShallowMLP
 
-Creates the full ViT-B model (86M params), then prunes the MLP hidden dimensions. With `--reduction-mlp-ratio 0.5`, the hidden dimension is reduced from 3072 to 1536.
+Reduces the MLP hidden dimension from 3072 to 1536 across all blocks while preserving initialization statistics from the full model:
 
-**Key characteristic:** Preserves initialization benefits from the larger model before pruning.
+```
+W_fc1 ← W_fc1_full[:d/2, :]
+W_fc2 ← W_fc2_full[:, :d/2]
+```
 
-### GroupedMLP
+**Key characteristics:**
+- Reduces both parameters and compute (11.3 GFLOPs)
+- 38% higher inference throughput
+- Inherits initialization from larger model before pruning
 
-Creates the full ViT-B model, then shares MLP module references between adjacent transformer blocks:
-- Blocks (0,1), (2,3), (4,5), (6,7), (8,9), (10,11) share MLPs
-- Results in 6 unique MLPs instead of 12
+### ThinMLP (Experimental)
 
-**Key characteristic:** Reduces parameters through weight sharing, not dimension reduction.
+Modifies the `mlp_ratio` parameter during model creation. Standard ViT uses `mlp_ratio=4.0` (768 → 3072 → 768). With `--reduction-mlp-ratio 2.0`, the MLP becomes (768 → 1536 → 768).
+
+**Key characteristics:**
+- Model is created smaller from scratch
+- Does not inherit initialization from larger model
+- Useful as a baseline comparison
 
 ## Parameter Reference
 
 | Argument | Description | Default |
 |----------|-------------|---------|
-| `--reduction-strategy` | Strategy to use: `thin`, `shallow`, or `grouped` | `None` (baseline) |
+| `--reduction-strategy` | Strategy: `thin`, `shallow`, or `grouped` | `None` (baseline) |
 | `--reduction-mlp-ratio` | Strategy-specific parameter (see below) | `2.0` |
 
 **`--reduction-mlp-ratio` meaning per strategy:**
 
 | Strategy | Parameter Meaning | Recommended Value |
 |----------|-------------------|-------------------|
-| ThinMLP | MLP ratio (hidden_dim / embed_dim) | `2.0` |
+| GroupedMLP | Weight scale factor (1/√2 for gradient balance) | `0.707` |
 | ShallowMLP | Fraction of hidden dim to keep | `0.5` |
-| GroupedMLP | Weight scale factor | `0.707` or `1.0` |
+| ThinMLP | MLP ratio (hidden_dim / embed_dim) | `2.0` |
 
 ## Project Structure
 
@@ -238,7 +289,21 @@ parameter-efficient-vit-mlps/
 │   │   ├── shallow_mlp.py   # ShallowMLPStrategy
 │   │   └── grouped_mlp.py   # GroupedMLPStrategy
 ├── train.py                  # Modified timm training script
+├── LICENSE
 └── README.md
+```
+
+## Citation
+
+If you find this work useful, please cite our paper:
+
+```bibtex
+@article{krishnakumar2025parameter,
+  title={Parameter Reduction Improves Vision Transformers: A Comparative Study of Sharing and Pruning},
+  author={Krishna Kumar, Anantha Padmanaban},
+  journal={arXiv preprint arXiv:XXXX.XXXXX},
+  year={2025}
+}
 ```
 
 ## License
@@ -248,3 +313,4 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 ## Acknowledgments
 
 - [timm](https://github.com/huggingface/pytorch-image-models) by Ross Wightman and Hugging Face
+- This work was conducted at Boston University
