@@ -2,7 +2,7 @@
 
 This repository contains the official implementation of **"Parameter Reduction Improves Vision Transformers: A Comparative Study of Sharing and Pruning"**.
 
-[[arXiv]](TBD)
+[[arXiv]](https://arxiv.org/abs/2512.01059)
 
 ## Key Findings
 
@@ -298,11 +298,14 @@ parameter-efficient-vit-mlps/
 If you find this work useful, please cite our paper:
 
 ```bibtex
-@article{krishnakumar2025parameter,
-  title={Parameter Reduction Improves Vision Transformers: A Comparative Study of Sharing and Pruning},
-  author={Krishna Kumar, Anantha Padmanaban},
-  journal={arXiv preprint arXiv:XXXX.XXXXX},
-  year={2025}
+@misc{kumar2025parameterreductionimprovesvision,
+      title={Parameter Reduction Improves Vision Transformers: A Comparative Study of Sharing and Width Reduction}, 
+      author={Anantha Padmanaban Krishna Kumar},
+      year={2025},
+      eprint={2512.01059},
+      archivePrefix={arXiv},
+      primaryClass={cs.CV},
+      url={https://arxiv.org/abs/2512.01059}, 
 }
 ```
 
